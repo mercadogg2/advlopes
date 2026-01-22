@@ -1,0 +1,8 @@
+{
+  "name": "F. Lopes - Sociedade Individual de Advocacia v.2",
+  "description": "Escritório especializado em Assessoria Jurídica Condominial, Servidores Públicos, Concursos e Advocacia Full Service em Maceió-AL.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
