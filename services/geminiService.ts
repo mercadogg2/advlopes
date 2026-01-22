@@ -18,15 +18,16 @@ REGRAS DE OURO:
 `;
 
 export const getGeminiResponse = async (history: { role: string, parts: { text: string }[] }[]) => {
-  // Always use process.env.API_KEY directly as required by guidelines
-  const apiKey = process.env.API_KEY;
+  // A chave deve vir exclusivamente do ambiente e ser limpa de espaços acidentais
+  const rawKey = process.env.API_KEY;
+  const apiKey = rawKey?.trim();
 
   if (!apiKey || apiKey === "undefined" || apiKey.length < 5) {
+    console.error("Aviso: Chave de API não configurada corretamente no ambiente.");
     throw new Error("KEY_MISSING");
   }
 
   try {
-    // Re-initialize for each call to ensure latest session settings/keys
     const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const response = await ai.models.generateContent({
@@ -38,7 +39,6 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
       },
     });
 
-    // Extract text output using the .text property directly
     const text = response.text;
     if (!text) {
       throw new Error("EMPTY_RESPONSE");
@@ -50,11 +50,12 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
     
     const errorMsg = error.message || "";
     
-    // Check for common key/project related errors to prompt user for re-authentication if necessary
+    // Erros de permissão ou chave inválida
     if (errorMsg.includes("Requested entity was not found") || 
         errorMsg.includes("API key not valid") || 
         errorMsg.includes("403") ||
-        errorMsg.includes("expired")) {
+        errorMsg.includes("invalid_argument") ||
+        errorMsg.includes("API_KEY_INVALID")) {
       throw new Error("KEY_INVALID");
     }
     
