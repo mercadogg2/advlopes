@@ -2,36 +2,32 @@
 import { GoogleGenAI } from "@google/genai";
 
 /**
- * SISTEMA DE DIAGNÓSTICO E TRIAGEM - F. LOPES ADVOCACIA
- * Status: Aguardando sincronização de Variáveis de Ambiente (API_KEY).
- * Última verificação de integridade: ${new Date().toLocaleString('pt-BR')}
+ * SERVIÇO DE IA - F. LOPES ADVOCACIA
+ * Implementação resiliente que suporta variáveis de ambiente e seletor manual.
  */
 
 const SYSTEM_INSTRUCTION = `
-Você é o "Algoritmo de Qualificação Jurídica" do escritório F. Lopes Advocacia.
-Seu objetivo é filtrar e qualificar leads de alta conversão.
+Você é o assistente virtual de triagem do escritório F. Lopes Advocacia (Maceió-AL).
+Seu objetivo é qualificar leads interessados em: Trabalhista, Previdenciário, Condominial e Concursos Públicos.
 
-FLUXO DE TRIAGEM:
-1. Nome e Localização.
-2. Área (Trabalhista, Previdenciário, Condominial ou Servidor).
-3. Pergunta de corte técnica para a área.
-4. WhatsApp para contato.
-
-IMPORTANTE: Responda de forma elegante e profissional.
-Ao final da triagem, você DEVE incluir: [TRIAGEM_SCORE: QUENTE] e uma [FICHA_TECNICA] resumida.
+REGRAS DE OURO:
+1. Seja formal, mas acolhedor.
+2. Identifique o Nome e a Localização do cliente.
+3. Identifique a área do problema.
+4. Peça o WhatsApp para que o Dr. Felipe possa enviar o parecer técnico.
+5. Finalize com [TRIAGEM_SCORE: QUENTE|MORNO|FRIO] e a [FICHA_TECNICA].
 `;
 
 export const getGeminiResponse = async (history: { role: string, parts: { text: string }[] }[]) => {
-  // A API_KEY deve ser configurada no painel da Netlify como Environment Variable
-  const apiKey = process.env.API_KEY;
+  // Tenta obter a chave do processo ou do ambiente global
+  const apiKey = (typeof process !== 'undefined' && process.env?.API_KEY) || "";
 
   if (!apiKey || apiKey === "undefined" || apiKey.length < 5) {
-    console.error("❌ ERRO DE CONFIGURAÇÃO: A 'API_KEY' não foi detectada no ambiente da Netlify.");
-    console.info("Acesse: Site Settings > Environment Variables e adicione a chave com o nome API_KEY.");
-    return "O assistente está em manutenção técnica de conexão. Por favor, utilize o botão de WhatsApp abaixo para falar diretamente com o Dr. Felipe enquanto sincronizamos nosso sistema.";
+    throw new Error("KEY_MISSING");
   }
 
   try {
+    // Instancia o cliente no momento da chamada para garantir o uso da chave atual
     const ai = new GoogleGenAI({ apiKey });
     
     const response = await ai.models.generateContent({
@@ -39,22 +35,23 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
       contents: history,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.15, // Menor temperatura para respostas mais precisas
+        temperature: 0.2,
       },
     });
 
     if (!response || !response.text) {
-      throw new Error("Resposta da IA veio vazia.");
+      throw new Error("EMPTY_RESPONSE");
     }
 
     return response.text;
   } catch (error: any) {
-    console.error("❌ ERRO NA CHAMADA GEMINI:", error.message);
+    console.error("Erro na API Gemini:", error);
     
-    if (error.message?.includes("API key not valid")) {
-      return "Ops! A chave de acesso configurada parece estar incorreta. Por favor, verifique as configurações no painel da Netlify.";
+    // Se a entidade não for encontrada (erro comum de chave), sinaliza para reconfigurar
+    if (error.message?.includes("Requested entity was not found") || error.message?.includes("API key not valid")) {
+      throw new Error("KEY_INVALID");
     }
-
-    return "Tivemos uma pequena oscilação na rede. Você pode tentar novamente ou clicar no botão de WhatsApp para atendimento imediato.";
+    
+    throw error;
   }
 };

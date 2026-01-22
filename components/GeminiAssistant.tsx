@@ -6,7 +6,8 @@ import { CONTACT_INFO } from '../constants';
 
 const GeminiAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [status, setStatus] = useState<'chatting' | 'qualifying' | 'finalized'>('chatting');
+  const [status, setStatus] = useState<'chatting' | 'qualifying' | 'finalized' | 'error'>('chatting');
+  const [errorType, setErrorType] = useState<'none' | 'missing_key' | 'invalid_key'>('none');
   const [leadScore, setLeadScore] = useState<'QUENTE' | 'MORNO' | 'FRIO' | null>(null);
   const [triageSummary, setTriageSummary] = useState('');
   const [messages, setMessages] = useState<Message[]>([
@@ -20,18 +21,22 @@ const GeminiAssistant: React.FC = () => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, status]);
 
-  useEffect(() => {
-    const handleOpenTriage = () => setIsOpen(true);
-    window.addEventListener('open-triage', handleOpenTriage);
-    return () => window.removeEventListener('open-triage', handleOpenTriage);
-  }, []);
+  const handleOpenKeySelector = async () => {
+    if (window.aistudio?.openSelectKey) {
+      await window.aistudio.openSelectKey();
+      // Após abrir o seletor, tentamos reiniciar o status para permitir nova tentativa
+      setStatus('chatting');
+      setErrorType('none');
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Conexão restabelecida! Podemos continuar?' }]);
+    } else {
+      alert("Por favor, verifique se as Variáveis de Ambiente na Netlify foram salvas corretamente.");
+    }
+  };
 
-  // Função para formatar o texto (Negritos e Parágrafos)
   const renderFormattedText = (text: string) => {
     return text.split('\n').map((line, i) => {
-      // Processa negritos **texto**
       const parts = line.split(/(\*\*.*?\*\*)/g);
       const formattedLine = parts.map((part, j) => {
         if (part.startsWith('**') && part.endsWith('**')) {
@@ -39,12 +44,7 @@ const GeminiAssistant: React.FC = () => {
         }
         return part;
       });
-
-      return (
-        <p key={i} className={line.trim() === '' ? 'h-3' : 'mb-2 last:mb-0'}>
-          {formattedLine}
-        </p>
-      );
+      return <p key={i} className={line.trim() === '' ? 'h-3' : 'mb-2 last:mb-0'}>{formattedLine}</p>;
     });
   };
 
@@ -56,46 +56,42 @@ const GeminiAssistant: React.FC = () => {
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setIsLoading(true);
 
-    const history = [
-      ...messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      { role: 'user', parts: [{ text: userMsg }] }
-    ];
+    try {
+      const history = [
+        ...messages.map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.content }]
+        })),
+        { role: 'user', parts: [{ text: userMsg }] }
+      ];
 
-    const responseText = await getGeminiResponse(history as any);
-    
-    const scoreMatch = responseText.match(/\[TRIAGEM_SCORE:\s*(\w+)\]/);
-    
-    if (scoreMatch) {
-      const score = scoreMatch[1];
-      const cleanResponse = responseText.split('[TRIAGEM_SCORE:')[0].trim();
+      const responseText = await getGeminiResponse(history as any);
+      const scoreMatch = responseText.match(/\[TRIAGEM_SCORE:\s*(\w+)\]/);
       
-      let summary = "";
-      if (responseText.includes('[FICHA_TECNICA]')) {
-        summary = responseText.split('[FICHA_TECNICA]')[1].trim();
+      if (scoreMatch) {
+        const score = scoreMatch[1];
+        const cleanResponse = responseText.split('[TRIAGEM_SCORE:')[0].trim();
+        let summary = responseText.includes('[FICHA_TECNICA]') ? responseText.split('[FICHA_TECNICA]')[1].trim() : "";
+        setMessages(prev => [...prev, { role: 'assistant', content: cleanResponse || "Análise concluída." }]);
+        setLeadScore(score as any);
+        setTriageSummary(summary);
+        setStatus('finalized');
       } else {
-        summary = responseText.substring(responseText.indexOf(scoreMatch[0]) + scoreMatch[0].length).trim();
+        setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
       }
-
-      setMessages(prev => [...prev, { role: 'assistant', content: cleanResponse || "Análise técnica concluída com sucesso." }]);
-      setLeadScore(score as any);
-      setTriageSummary(summary);
-      setStatus('finalized');
-    } else {
-      setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
-      setStatus('chatting');
+    } catch (error: any) {
+      if (error.message === "KEY_MISSING") {
+        setStatus('error');
+        setErrorType('missing_key');
+      } else if (error.message === "KEY_INVALID") {
+        setStatus('error');
+        setErrorType('invalid_key');
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: "Desculpe, tive uma oscilação técnica. Pode repetir?" }]);
+      }
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
-  };
-
-  const handleFinalizeWhatsApp = () => {
-    const fallbackSummary = triageSummary || messages.map(m => `${m.role === 'user' ? 'Cliente' : 'IA'}: ${m.content}`).join('\n');
-    const text = `*NOVA TRIAGEM QUALIFICADA (SITE)*\n\n*Status:* ${leadScore === 'QUENTE' ? '🔥 QUENTE' : leadScore === 'MORNO' ? '⚡ MORNO' : '❄️ FRIO'}\n\n*Resumo:*\n${fallbackSummary}`;
-    const encoded = encodeURIComponent(text);
-    window.open(`https://wa.me/55${CONTACT_INFO.phone.replace(/\D/g, '')}?text=${encoded}`, '_blank');
   };
 
   return (
@@ -112,114 +108,80 @@ const GeminiAssistant: React.FC = () => {
         </button>
       ) : (
         <div className="bg-primary w-[350px] sm:w-[420px] h-[600px] rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.8)] flex flex-col border border-accent/20 overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-          {/* Header */}
           <div className="bg-secondary p-5 flex justify-between items-center text-white border-b border-accent/10">
             <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 bg-accent/10 rounded-full flex items-center justify-center border border-accent/30">
-                  <i className={`fa-solid ${status === 'finalized' ? 'fa-certificate' : 'fa-robot'} text-accent`}></i>
-                </div>
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-secondary"></span>
+              <div className="w-10 h-10 bg-accent/10 rounded-full flex items-center justify-center border border-accent/30">
+                <i className={`fa-solid ${status === 'error' ? 'fa-triangle-exclamation text-red-400' : 'fa-robot text-accent'}`}></i>
               </div>
               <div>
-                <p className="font-bold text-[9px] uppercase tracking-[0.2em] text-accent">Assistente Inteligente</p>
+                <p className="font-bold text-[9px] uppercase tracking-[0.2em] text-accent">Assistente Digital</p>
                 <p className="text-white text-[11px] font-serif italic">F. Lopes Advocacia</p>
               </div>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-white/20 hover:text-white transition-colors p-2">
-              <i className="fa-solid fa-xmark text-lg"></i>
-            </button>
+            <button onClick={() => setIsOpen(false)} className="text-white/20 hover:text-white p-2"><i className="fa-solid fa-xmark text-lg"></i></button>
           </div>
 
-          {/* Progress Bar */}
-          <div className="h-0.5 bg-white/5 w-full">
-            <div className={`h-full bg-accent transition-all duration-1000 ease-out ${status === 'chatting' ? 'w-1/3' : status === 'qualifying' ? 'w-2/3' : 'w-full shadow-[0_0_10px_#C5A059]'}`}></div>
-          </div>
-
-          {/* Messages */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-[radial-gradient(circle_at_top_right,_rgba(197,160,89,0.05),_transparent_50%)]">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6">
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                <div className={`max-w-[90%] p-4 rounded-2xl text-[13px] leading-relaxed ${
-                  m.role === 'user' 
-                  ? 'bg-accent text-primary font-bold rounded-tr-none shadow-lg' 
-                  : 'bg-secondary/60 border border-white/5 text-white/90 rounded-tl-none backdrop-blur-sm'
-                }`}>
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[90%] p-4 rounded-2xl text-[13px] ${m.role === 'user' ? 'bg-accent text-primary font-bold' : 'bg-secondary/60 text-white/90 border border-white/5'}`}>
                   {m.role === 'assistant' ? renderFormattedText(m.content) : m.content}
                 </div>
               </div>
             ))}
             
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-secondary/50 border border-white/5 p-4 rounded-2xl rounded-tl-none">
-                  <div className="flex gap-1.5">
-                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></div>
-                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-100"></div>
-                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-200"></div>
-                  </div>
-                </div>
+            {status === 'error' && (
+              <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-2xl text-center space-y-4">
+                <p className="text-white text-xs">Para ativar a Inteligência Artificial e realizar sua triagem automática, é necessário configurar a conexão segura.</p>
+                <button 
+                  onClick={handleOpenKeySelector}
+                  className="w-full bg-white text-primary font-bold py-3 rounded-lg text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-colors"
+                >
+                  Configurar Conexão Agora
+                </button>
+                <p className="text-[9px] text-white/40">Ou fale conosco diretamente:</p>
+                <a href={`https://wa.me/55${CONTACT_INFO.phone}`} className="block text-accent font-bold text-xs underline">WhatsApp Direto</a>
               </div>
             )}
 
             {status === 'finalized' && (
-              <div className="animate-in fade-in zoom-in-95 duration-700 delay-300">
-                <div className={`p-6 rounded-3xl border ${leadScore === 'QUENTE' ? 'bg-accent/5 border-accent/30' : 'bg-white/5 border-white/10'}`}>
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${leadScore === 'QUENTE' ? 'bg-accent text-primary' : 'bg-white/10 text-white'}`}>
-                      <i className={`fa-solid ${leadScore === 'QUENTE' ? 'fa-fire-flame-curved' : 'fa-check'}`}></i>
-                    </div>
-                    <div>
-                      <h5 className="font-serif text-white text-base">Relatório de Triagem</h5>
-                      <p className="text-[10px] text-white/40 uppercase tracking-widest">
-                        Status: <span className={leadScore === 'QUENTE' ? 'text-accent' : 'text-white/60'}>{leadScore}</span>
-                      </p>
-                    </div>
-                  </div>
+              <div className="p-6 rounded-3xl border bg-accent/5 border-accent/30">
+                <h5 className="font-serif text-white text-base mb-4 text-center">Triagem Concluída</h5>
+                <button 
+                  onClick={() => window.open(`https://wa.me/55${CONTACT_INFO.phone.replace(/\D/g, '')}?text=Olá! Acabei de realizar a triagem no site e gostaria de atendimento.`, '_blank')}
+                  className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-3"
+                >
+                  <i className="fa-brands fa-whatsapp text-lg"></i>
+                  Falar com Dr. Felipe
+                </button>
+              </div>
+            )}
 
-                  <div className="space-y-4 mb-8">
-                    {triageSummary.split('\n').filter(l => l.includes(':')).map((line, idx) => {
-                      const [label, ...val] = line.split(':');
-                      return (
-                        <div key={idx} className="flex flex-col gap-1 border-b border-white/5 pb-2">
-                          <span className="text-[9px] uppercase tracking-tighter text-white/30 font-bold">{label.trim()}</span>
-                          <span className="text-[12px] text-white/80">{val.join(':').trim()}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <button 
-                    onClick={handleFinalizeWhatsApp}
-                    className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
-                  >
-                    <i className="fa-brands fa-whatsapp text-lg"></i>
-                    Falar com Dr. Felipe
-                  </button>
-                  
-                  <p className="mt-4 text-[9px] text-center text-white/20 uppercase tracking-[0.2em]">
-                    Dados protegidos por sigilo profissional
-                  </p>
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-secondary/50 p-4 rounded-2xl flex gap-1.5">
+                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></div>
+                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-100"></div>
+                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-200"></div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Input Area */}
-          {status !== 'finalized' && (
-            <div className="p-6 bg-secondary/90 border-t border-accent/10 flex gap-3 relative">
+          {status !== 'finalized' && status !== 'error' && (
+            <div className="p-6 bg-secondary/90 border-t border-accent/10 flex gap-3">
               <input 
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Responda aqui..."
-                className="flex-1 text-[13px] bg-primary/50 text-white outline-none border border-white/10 rounded-2xl px-5 py-4 focus:border-accent/50 transition-all placeholder:text-white/20 shadow-inner"
+                placeholder="Digite sua resposta..."
+                className="flex-1 text-[13px] bg-primary/50 text-white outline-none border border-white/10 rounded-2xl px-5 py-4 focus:border-accent/50"
               />
               <button 
                 onClick={handleSend}
                 disabled={isLoading}
-                className="bg-accent text-primary w-14 h-14 rounded-2xl flex items-center justify-center hover:shadow-[0_0_20px_rgba(197,160,89,0.3)] transition-all active:scale-90 disabled:opacity-30"
+                className="bg-accent text-primary w-14 h-14 rounded-2xl flex items-center justify-center disabled:opacity-30"
               >
                 <i className="fa-solid fa-chevron-right"></i>
               </button>
