@@ -3,7 +3,6 @@ import { GoogleGenAI } from "@google/genai";
 
 /**
  * SERVIÇO DE IA - F. LOPES ADVOCACIA
- * Implementação resiliente seguindo estritamente as diretrizes da Gemini API.
  */
 
 const SYSTEM_INSTRUCTION = `
@@ -18,9 +17,8 @@ REGRAS DE OURO:
 5. Finalize com [TRIAGEM_SCORE: QUENTE|MORNO|FRIO] e a [FICHA_TECNICA].
 `;
 
-// Fix: Use process.env.API_KEY exclusively and remove manual key storage logic.
 export const getGeminiResponse = async (history: { role: string, parts: { text: string }[] }[]) => {
-  // O uso de process.env.API_KEY é obrigatório e exclusivo.
+  // Always use process.env.API_KEY directly as required by guidelines
   const apiKey = process.env.API_KEY;
 
   if (!apiKey || apiKey === "undefined" || apiKey.length < 5) {
@@ -28,7 +26,7 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
   }
 
   try {
-    // Fix: Always create a new instance right before making an API call to ensure latest key is used.
+    // Re-initialize for each call to ensure latest session settings/keys
     const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const response = await ai.models.generateContent({
@@ -36,20 +34,27 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
       contents: history,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.2,
+        temperature: 0.3,
       },
     });
 
-    if (!response || !response.text) {
+    // Extract text output using the .text property directly
+    const text = response.text;
+    if (!text) {
       throw new Error("EMPTY_RESPONSE");
     }
 
-    return response.text;
+    return text;
   } catch (error: any) {
     console.error("Erro na API Gemini:", error);
     
-    // Tratamento específico para erro de entidade não encontrada (chave inválida/projeto não pago)
-    if (error.message?.includes("Requested entity was not found") || error.message?.includes("API key not valid") || error.message?.includes("403")) {
+    const errorMsg = error.message || "";
+    
+    // Check for common key/project related errors to prompt user for re-authentication if necessary
+    if (errorMsg.includes("Requested entity was not found") || 
+        errorMsg.includes("API key not valid") || 
+        errorMsg.includes("403") ||
+        errorMsg.includes("expired")) {
       throw new Error("KEY_INVALID");
     }
     
