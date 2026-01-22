@@ -15,18 +15,20 @@ const GeminiAssistant: React.FC = () => {
   const [errorType, setErrorType] = useState<'missing' | 'invalid' | 'generic'>('generic');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Verifica proativamente se a chave está no ambiente
+  // Função para checar a chave de forma dinâmica
+  const checkKeyAvailability = () => {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey || apiKey === "undefined" || apiKey === "" || apiKey.length < 10) {
+      return false;
+    }
+    return true;
+  };
+
   useEffect(() => {
-    const checkKey = () => {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey || apiKey === "undefined" || apiKey === "" || apiKey.length < 10) {
-        setStatus('error');
-        setErrorType('missing');
-      } else {
-        setStatus('chatting');
-      }
-    };
-    checkKey();
+    if (!checkKeyAvailability()) {
+      setStatus('error');
+      setErrorType('missing');
+    }
   }, []);
 
   useEffect(() => {
@@ -40,15 +42,28 @@ const GeminiAssistant: React.FC = () => {
     if (aistudio?.openSelectKey) {
       try {
         await aistudio.openSelectKey();
-        // Após abrir o seletor, assumimos sucesso para permitir que o usuário tente novamente
+        // Após abrir o seletor, damos ao usuário a chance de tentar novamente
         setStatus('chatting');
         setMessages(prev => [...prev, { 
           role: 'assistant', 
-          content: 'Conexão manual solicitada. Tente enviar sua mensagem novamente agora!' 
+          content: 'Conexão manual estabelecida. Pode enviar sua mensagem agora!' 
         }]);
       } catch (e) {
         console.error("Erro ao selecionar chave", e);
       }
+    }
+  };
+
+  const handleManualRetry = () => {
+    if (checkKeyAvailability()) {
+      setStatus('chatting');
+      setErrorType('generic');
+    } else {
+      // Se ainda não detectou, apenas "pisca" o estado para mostrar que tentou
+      setStatus('error');
+      const btn = document.getElementById('retry-btn');
+      btn?.classList.add('animate-shake');
+      setTimeout(() => btn?.classList.remove('animate-shake'), 500);
     }
   };
 
@@ -79,7 +94,6 @@ const GeminiAssistant: React.FC = () => {
         setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
       }
     } catch (error: any) {
-      console.error("Erro capturado no componente:", error.message);
       if (error.message === "KEY_NOT_CONFIGURED") {
         setStatus('error');
         setErrorType('missing');
@@ -87,7 +101,7 @@ const GeminiAssistant: React.FC = () => {
         setStatus('error');
         setErrorType('invalid');
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: "Houve um erro de conexão. Tente novamente ou use o botão de conexão manual." }]);
+        setMessages(prev => [...prev, { role: 'assistant', content: "Houve um erro de conexão. Tente novamente ou conecte manualmente abaixo." }]);
       }
     } finally {
       setIsLoading(false);
@@ -110,7 +124,7 @@ const GeminiAssistant: React.FC = () => {
           )}
         </button>
       ) : (
-        <div className="bg-primary w-[350px] sm:w-[400px] h-[580px] rounded-3xl shadow-3xl flex flex-col border border-accent/20 overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="bg-primary w-[350px] sm:w-[400px] h-[600px] rounded-3xl shadow-3xl flex flex-col border border-accent/20 overflow-hidden animate-in zoom-in-95 duration-300">
           {/* Header */}
           <div className="bg-secondary p-5 flex justify-between items-center border-b border-accent/10">
             <div className="flex items-center gap-3">
@@ -143,21 +157,31 @@ const GeminiAssistant: React.FC = () => {
                    <i className="fa-solid fa-key"></i>
                 </div>
                 <div className="space-y-2">
-                  <h4 className="text-white text-sm font-bold uppercase tracking-wider">Aguardando Validação</h4>
+                  <h4 className="text-white text-sm font-bold uppercase tracking-wider">Chave não Detectada</h4>
                   <p className="text-white/40 text-[11px] leading-relaxed">
-                    Detectamos que o site ainda não carregou sua chave de API (provavelmente devido ao cache do servidor).
+                    O servidor do site ainda não carregou sua configuração de API. Isso é comum em novos deploys.
                   </p>
-                  <p className="text-accent/60 text-[11px] font-bold">
-                    Clique no botão abaixo para conectar sua chave agora mesmo.
+                  <p className="text-accent text-[11px] font-bold">
+                    Resolva isso agora clicando no botão dourado abaixo e selecionando sua chave.
                   </p>
                 </div>
                 
-                <button 
-                  onClick={handleOpenKeySelector}
-                  className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest hover:brightness-110 transition-all shadow-xl shadow-accent/10"
-                >
-                  Conectar Chave Agora
-                </button>
+                <div className="space-y-3">
+                  <button 
+                    onClick={handleOpenKeySelector}
+                    className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest hover:brightness-110 transition-all shadow-xl shadow-accent/10"
+                  >
+                    Conectar Chave Manualmente
+                  </button>
+                  
+                  <button 
+                    id="retry-btn"
+                    onClick={handleManualRetry}
+                    className="w-full bg-white/5 text-white/40 font-bold py-3 rounded-xl text-[9px] uppercase tracking-[0.2em] border border-white/5 hover:bg-white/10 transition-all"
+                  >
+                    Tentar Re-validar Automático
+                  </button>
+                </div>
                 
                 <div className="pt-4 border-t border-white/5">
                   <a 
@@ -165,7 +189,7 @@ const GeminiAssistant: React.FC = () => {
                     target="_blank" 
                     className="flex items-center justify-center gap-2 text-white/30 text-[9px] font-bold uppercase hover:text-accent transition-colors"
                   >
-                    <i className="fa-brands fa-whatsapp"></i> Ou Pular para o WhatsApp
+                    <i className="fa-brands fa-whatsapp"></i> Chamar no WhatsApp Direto
                   </a>
                 </div>
               </div>
@@ -176,13 +200,13 @@ const GeminiAssistant: React.FC = () => {
                 <i className="fa-solid fa-circle-check text-accent text-4xl"></i>
                 <div className="space-y-2">
                   <h5 className="text-white font-serif text-lg">Triagem Realizada</h5>
-                  <p className="text-white/50 text-xs">O Dr. Felipe Lopes já tem os detalhes do seu caso para análise.</p>
+                  <p className="text-white/50 text-xs">Seus dados foram enviados. O Dr. Felipe entrará em contato em breve.</p>
                 </div>
                 <button 
                   onClick={() => window.open(`https://wa.me/55${CONTACT_INFO.phone}`, '_blank')}
                   className="w-full gold-bg-gradient text-primary font-bold py-5 rounded-xl text-[10px] uppercase tracking-widest shadow-2xl"
                 >
-                  Chamar no WhatsApp
+                  Confirmar no WhatsApp
                 </button>
               </div>
             )}
@@ -204,7 +228,7 @@ const GeminiAssistant: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Como posso ajudar?"
+                placeholder="Como posso ajudar hoje?"
                 className="flex-1 bg-primary/50 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm outline-none focus:border-accent/50 transition-all placeholder:text-white/20"
               />
               <button 
