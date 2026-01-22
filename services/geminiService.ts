@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 
 /**
  * SERVIÇO DE IA - F. LOPES ADVOCACIA
- * Implementação resiliente que suporta variáveis de ambiente e seletor manual.
+ * Implementação resiliente seguindo estritamente as diretrizes da Gemini API.
  */
 
 const SYSTEM_INSTRUCTION = `
@@ -18,17 +18,18 @@ REGRAS DE OURO:
 5. Finalize com [TRIAGEM_SCORE: QUENTE|MORNO|FRIO] e a [FICHA_TECNICA].
 `;
 
+// Fix: Use process.env.API_KEY exclusively and remove manual key storage logic.
 export const getGeminiResponse = async (history: { role: string, parts: { text: string }[] }[]) => {
-  // Tenta obter a chave do processo ou do ambiente global
-  const apiKey = (typeof process !== 'undefined' && process.env?.API_KEY) || "";
+  // O uso de process.env.API_KEY é obrigatório e exclusivo.
+  const apiKey = process.env.API_KEY;
 
   if (!apiKey || apiKey === "undefined" || apiKey.length < 5) {
     throw new Error("KEY_MISSING");
   }
 
   try {
-    // Instancia o cliente no momento da chamada para garantir o uso da chave atual
-    const ai = new GoogleGenAI({ apiKey });
+    // Fix: Always create a new instance right before making an API call to ensure latest key is used.
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -47,8 +48,8 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
   } catch (error: any) {
     console.error("Erro na API Gemini:", error);
     
-    // Se a entidade não for encontrada (erro comum de chave), sinaliza para reconfigurar
-    if (error.message?.includes("Requested entity was not found") || error.message?.includes("API key not valid")) {
+    // Tratamento específico para erro de entidade não encontrada (chave inválida/projeto não pago)
+    if (error.message?.includes("Requested entity was not found") || error.message?.includes("API key not valid") || error.message?.includes("403")) {
       throw new Error("KEY_INVALID");
     }
     

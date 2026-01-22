@@ -4,12 +4,16 @@ import { getGeminiResponse } from '../services/geminiService';
 import { Message } from '../types';
 import { CONTACT_INFO } from '../constants';
 
+// Fix: Use the AIStudio type for window.aistudio to match global declarations and resolve property mismatch error.
+declare global {
+  interface Window {
+    aistudio: AIStudio;
+  }
+}
+
 const GeminiAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<'chatting' | 'qualifying' | 'finalized' | 'error'>('chatting');
-  const [errorType, setErrorType] = useState<'none' | 'missing_key' | 'invalid_key'>('none');
-  const [leadScore, setLeadScore] = useState<'QUENTE' | 'MORNO' | 'FRIO' | null>(null);
-  const [triageSummary, setTriageSummary] = useState('');
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Olá! Sou a assistente digital do Dr. Felipe Lopes. Para uma análise rápida da viabilidade do seu caso, como posso te chamar?' }
   ]);
@@ -23,15 +27,33 @@ const GeminiAssistant: React.FC = () => {
     }
   }, [messages, isLoading, status]);
 
+  // Fix: Check for API key selection when the assistant is opened to guide the user if needed.
+  useEffect(() => {
+    if (isOpen) {
+      const checkKey = async () => {
+        if (window.aistudio?.hasSelectedApiKey) {
+          const hasKey = await window.aistudio.hasSelectedApiKey();
+          if (!hasKey) {
+            setStatus('error');
+          }
+        }
+      };
+      checkKey();
+    }
+  }, [isOpen]);
+
+  // Fix: handleOpenKeySelector now assumes success after triggering the dialog to avoid race conditions.
   const handleOpenKeySelector = async () => {
     if (window.aistudio?.openSelectKey) {
-      await window.aistudio.openSelectKey();
-      // Após abrir o seletor, tentamos reiniciar o status para permitir nova tentativa
-      setStatus('chatting');
-      setErrorType('none');
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Conexão restabelecida! Podemos continuar?' }]);
-    } else {
-      alert("Por favor, verifique se as Variáveis de Ambiente na Netlify foram salvas corretamente.");
+      try {
+        await window.aistudio.openSelectKey();
+        // Fix: Assume the key selection was successful after triggering openSelectKey() and proceed to the app.
+        setStatus('chatting');
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Conexão restabelecida! Como podemos prosseguir com seu caso?' }]);
+      } catch (e) {
+        console.error("Erro ao abrir seletor de chave:", e);
+        setStatus('error');
+      }
     }
   };
 
@@ -69,23 +91,16 @@ const GeminiAssistant: React.FC = () => {
       const scoreMatch = responseText.match(/\[TRIAGEM_SCORE:\s*(\w+)\]/);
       
       if (scoreMatch) {
-        const score = scoreMatch[1];
         const cleanResponse = responseText.split('[TRIAGEM_SCORE:')[0].trim();
-        let summary = responseText.includes('[FICHA_TECNICA]') ? responseText.split('[FICHA_TECNICA]')[1].trim() : "";
         setMessages(prev => [...prev, { role: 'assistant', content: cleanResponse || "Análise concluída." }]);
-        setLeadScore(score as any);
-        setTriageSummary(summary);
         setStatus('finalized');
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
       }
     } catch (error: any) {
-      if (error.message === "KEY_MISSING") {
+      // Fix: Reset status to error if key is missing or invalid so the user can select a new one.
+      if (error.message === "KEY_MISSING" || error.message === "KEY_INVALID") {
         setStatus('error');
-        setErrorType('missing_key');
-      } else if (error.message === "KEY_INVALID") {
-        setStatus('error');
-        setErrorType('invalid_key');
       } else {
         setMessages(prev => [...prev, { role: 'assistant', content: "Desculpe, tive uma oscilação técnica. Pode repetir?" }]);
       }
@@ -111,10 +126,10 @@ const GeminiAssistant: React.FC = () => {
           <div className="bg-secondary p-5 flex justify-between items-center text-white border-b border-accent/10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-accent/10 rounded-full flex items-center justify-center border border-accent/30">
-                <i className={`fa-solid ${status === 'error' ? 'fa-triangle-exclamation text-red-400' : 'fa-robot text-accent'}`}></i>
+                <i className={`fa-solid ${status === 'error' ? 'fa-key text-accent' : 'fa-robot text-accent'}`}></i>
               </div>
               <div>
-                <p className="font-bold text-[9px] uppercase tracking-[0.2em] text-accent">Assistente Digital</p>
+                <p className="font-bold text-[9px] uppercase tracking-[0.2em] text-accent">Assistente IA</p>
                 <p className="text-white text-[11px] font-serif italic">F. Lopes Advocacia</p>
               </div>
             </div>
@@ -122,50 +137,52 @@ const GeminiAssistant: React.FC = () => {
           </div>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6">
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[90%] p-4 rounded-2xl text-[13px] ${m.role === 'user' ? 'bg-accent text-primary font-bold' : 'bg-secondary/60 text-white/90 border border-white/5'}`}>
-                  {m.role === 'assistant' ? renderFormattedText(m.content) : m.content}
+            <>
+              {messages.map((m, i) => (
+                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[90%] p-4 rounded-2xl text-[13px] ${m.role === 'user' ? 'bg-accent text-primary font-bold' : 'bg-secondary/60 text-white/90 border border-white/5'}`}>
+                    {m.role === 'assistant' ? renderFormattedText(m.content) : m.content}
+                  </div>
                 </div>
-              </div>
-            ))}
-            
-            {status === 'error' && (
-              <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-2xl text-center space-y-4">
-                <p className="text-white text-xs">Para ativar a Inteligência Artificial e realizar sua triagem automática, é necessário configurar a conexão segura.</p>
-                <button 
-                  onClick={handleOpenKeySelector}
-                  className="w-full bg-white text-primary font-bold py-3 rounded-lg text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-colors"
-                >
-                  Configurar Conexão Agora
-                </button>
-                <p className="text-[9px] text-white/40">Ou fale conosco diretamente:</p>
-                <a href={`https://wa.me/55${CONTACT_INFO.phone}`} className="block text-accent font-bold text-xs underline">WhatsApp Direto</a>
-              </div>
-            )}
-
-            {status === 'finalized' && (
-              <div className="p-6 rounded-3xl border bg-accent/5 border-accent/30">
-                <h5 className="font-serif text-white text-base mb-4 text-center">Triagem Concluída</h5>
-                <button 
-                  onClick={() => window.open(`https://wa.me/55${CONTACT_INFO.phone.replace(/\D/g, '')}?text=Olá! Acabei de realizar a triagem no site e gostaria de atendimento.`, '_blank')}
-                  className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-3"
-                >
-                  <i className="fa-brands fa-whatsapp text-lg"></i>
-                  Falar com Dr. Felipe
-                </button>
-              </div>
-            )}
-
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-secondary/50 p-4 rounded-2xl flex gap-1.5">
-                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></div>
-                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-100"></div>
-                  <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-200"></div>
+              ))}
+              
+              {status === 'error' && (
+                <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-2xl text-center space-y-4">
+                  <p className="text-white text-xs">Para utilizar nosso assistente jurídico via IA, é necessário selecionar uma chave de API válida vinculada a um projeto com faturamento.</p>
+                  <button 
+                    onClick={handleOpenKeySelector}
+                    className="w-full bg-white text-primary font-bold py-3 rounded-lg text-[10px] uppercase tracking-widest hover:bg-gray-200 transition-colors"
+                  >
+                    Selecionar Chave (Google AI Studio)
+                  </button>
+                  <p className="text-[9px] text-white/40">Consulte <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="underline text-accent">documentação de faturamento</a> se necessário.</p>
+                  <a href={`https://wa.me/55${CONTACT_INFO.phone}`} className="block text-accent font-bold text-xs underline">Falar com Humano no WhatsApp</a>
                 </div>
-              </div>
-            )}
+              )}
+
+              {status === 'finalized' && (
+                <div className="p-6 rounded-3xl border bg-accent/5 border-accent/30">
+                  <h5 className="font-serif text-white text-base mb-4 text-center">Triagem Concluída</h5>
+                  <button 
+                    onClick={() => window.open(`https://wa.me/55${CONTACT_INFO.phone.replace(/\D/g, '')}?text=Olá! Acabei de realizar a triagem no site e gostaria de atendimento.`, '_blank')}
+                    className="w-full gold-bg-gradient text-primary font-bold py-4 rounded-xl text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-3"
+                  >
+                    <i className="fa-brands fa-whatsapp text-lg"></i>
+                    Falar com Dr. Felipe
+                  </button>
+                </div>
+              )}
+
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-secondary/50 p-4 rounded-2xl flex gap-1.5">
+                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-100"></div>
+                    <div className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce delay-200"></div>
+                  </div>
+                </div>
+              )}
+            </>
           </div>
 
           {status !== 'finalized' && status !== 'error' && (
