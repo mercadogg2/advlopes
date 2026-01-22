@@ -2,39 +2,33 @@
 import { GoogleGenAI } from "@google/genai";
 
 /**
- * ATUALIZAÇÃO DE SINCRONIZAÇÃO - F. LOPES ADVOCACIA
- * Timestamp de Redeploy: ${new Date().toLocaleString('pt-BR')}
- * Objetivo: Forçar o reconhecimento da API_KEY configurada no painel da Netlify.
+ * SISTEMA DE DIAGNÓSTICO E TRIAGEM - F. LOPES ADVOCACIA
+ * Status: Aguardando sincronização de Variáveis de Ambiente (API_KEY).
+ * Última verificação de integridade: ${new Date().toLocaleString('pt-BR')}
  */
 
 const SYSTEM_INSTRUCTION = `
 Você é o "Algoritmo de Qualificação Jurídica" do escritório F. Lopes Advocacia.
-Seu objetivo é filtrar e qualificar leads de alta conversão, descartando casos inviáveis.
+Seu objetivo é filtrar e qualificar leads de alta conversão.
 
-FLUXO DE TRIAGEM OBRIGATÓRIO:
-1. IDENTIFICAÇÃO: Nome e Localização (foco em Alagoas/Brasil).
-2. CATEGORIZAÇÃO: Identificar se é Trabalhista, Previdenciário, Condominial ou Servidor Público.
-3. QUALIFICAÇÃO TÉCNICA:
-   - TRABALHISTA: Perguntar "Há quanto tempo você saiu da empresa?". Se for > 2 anos, informe sobre prescrição.
-   - PREVIDENCIÁRIO: Perguntar sobre negativa do INSS e laudos.
-   - SERVIDOR/CONCURSOS: Identificar o ente e o ato administrativo.
-   - CONDOMINIAL: Identificar se é gestão ou conflito.
+FLUXO DE TRIAGEM:
+1. Nome e Localização.
+2. Área (Trabalhista, Previdenciário, Condominial ou Servidor).
+3. Pergunta de corte técnica para a área.
+4. WhatsApp para contato.
 
-4. LEAD SCORING: [QUENTE|MORNO|FRIO].
-5. COLETA DE WHATSAPP: Imprescindível.
-
-REGRAS:
-- Use "viabilidade jurídica".
-- Encerre com as tags [TRIAGEM_SCORE: ...] e [FICHA_TECNICA].
+IMPORTANTE: Responda de forma elegante e profissional.
+Ao final da triagem, você DEVE incluir: [TRIAGEM_SCORE: QUENTE] e uma [FICHA_TECNICA] resumida.
 `;
 
 export const getGeminiResponse = async (history: { role: string, parts: { text: string }[] }[]) => {
+  // A API_KEY deve ser configurada no painel da Netlify como Environment Variable
   const apiKey = process.env.API_KEY;
 
-  // Verificação de segurança para o ambiente de produção
-  if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
-    console.error("⚠️ DIAGNÓSTICO F. LOPES: A chave de API não foi detectada. Verifique se a variável 'API_KEY' foi salva corretamente na Netlify e se o deploy foi concluído.");
-    return "O sistema de inteligência artificial ainda não foi configurado com uma chave de acesso. Por favor, clique no botão de WhatsApp para atendimento manual.";
+  if (!apiKey || apiKey === "undefined" || apiKey.length < 5) {
+    console.error("❌ ERRO DE CONFIGURAÇÃO: A 'API_KEY' não foi detectada no ambiente da Netlify.");
+    console.info("Acesse: Site Settings > Environment Variables e adicione a chave com o nome API_KEY.");
+    return "O assistente está em manutenção técnica de conexão. Por favor, utilize o botão de WhatsApp abaixo para falar diretamente com o Dr. Felipe enquanto sincronizamos nosso sistema.";
   }
 
   try {
@@ -45,24 +39,22 @@ export const getGeminiResponse = async (history: { role: string, parts: { text: 
       contents: history,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.2,
-        maxOutputTokens: 1000,
+        temperature: 0.15, // Menor temperatura para respostas mais precisas
       },
     });
 
     if (!response || !response.text) {
-      throw new Error("Resposta vazia da API.");
+      throw new Error("Resposta da IA veio vazia.");
     }
 
     return response.text;
   } catch (error: any) {
-    // Tratamento de erros de cota ou rede
-    if (error.message?.includes("429")) {
-      console.warn("⚠️ DIAGNÓSTICO F. LOPES: Limite de uso gratuito atingido temporariamente.");
-    } else {
-      console.error("❌ DIAGNÓSTICO F. LOPES: Erro crítico na conexão com a IA:", error);
-    }
+    console.error("❌ ERRO NA CHAMADA GEMINI:", error.message);
     
-    return "Tivemos um pequeno problema técnico na análise. Para não perder tempo, você pode falar diretamente com o Dr. Felipe clicando no botão de WhatsApp abaixo.";
+    if (error.message?.includes("API key not valid")) {
+      return "Ops! A chave de acesso configurada parece estar incorreta. Por favor, verifique as configurações no painel da Netlify.";
+    }
+
+    return "Tivemos uma pequena oscilação na rede. Você pode tentar novamente ou clicar no botão de WhatsApp para atendimento imediato.";
   }
 };
